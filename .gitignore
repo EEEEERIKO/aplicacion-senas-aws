@@ -1,0 +1,13 @@
+/.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+/.idea/
+/.vscode/
+/.venv/
+__pycache__/
+build/
+*.zip
+localstack-data/
+/.pytest_cache
+/.aws-sam
