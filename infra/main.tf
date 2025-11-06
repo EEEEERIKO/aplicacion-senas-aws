@@ -5,13 +5,53 @@
 
 resource "aws_s3_bucket" "assets" {
   bucket = var.s3_bucket_name
-  acl    = "private"
+}
 
-  lifecycle_rule {
+resource "aws_s3_bucket_acl" "assets_acl" {
+  bucket = aws_s3_bucket.assets.id
+  acl    = "private"
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "assets_encryption" {
+  bucket = aws_s3_bucket.assets.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "assets_block" {
+  bucket = aws_s3_bucket.assets.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "assets_versioning" {
+  bucket = aws_s3_bucket.assets.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "assets_lifecycle" {
+  bucket = aws_s3_bucket.assets.id
+
+  rule {
     id      = "expire-temp-uploads"
-    enabled = true
+    status  = "Enabled"
+
     expiration {
       days = 365
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
     }
   }
 }
@@ -57,6 +97,23 @@ resource "aws_dynamodb_table" "app_table" {
     range_key          = "SK"
     projection_type    = "ALL"
   }
+
+  # SECURITY: Enable encryption at rest with AWS managed key
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = null  # null = use AWS managed key; set to aws_kms_key.*.arn for CMK
+  }
+
+  # Enable point-in-time recovery for data durability
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  tags = {
+    Environment = "production"
+    Project     = "aplicacion-senas"
+    ManagedBy   = "terraform"
+  }
 }
 
 ########################################
@@ -79,35 +136,43 @@ resource "aws_iam_role" "lambda_role" {
 
 resource "aws_iam_policy" "lambda_policy" {
   name        = "aplicacion_senas_lambda_policy"
-  description = "Allow Lambda to access DynamoDB and S3 (least privilege sample)."
+  description = "Allow Lambda to access DynamoDB and S3 with least privilege."
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid = "DynamoDBAccess"
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:Query",
-          "dynamodb:Scan",
           "dynamodb:UpdateItem",
           "dynamodb:BatchWriteItem",
         ]
-        Effect   = "Allow"
-        Resource = [aws_dynamodb_table.app_table.arn]
+        Effect = "Allow"
+        Resource = [
+          aws_dynamodb_table.app_table.arn,
+          "${aws_dynamodb_table.app_table.arn}/index/*"
+        ]
       },
       {
+        Sid = "S3ReadAccess"
         Action = [
           "s3:GetObject",
-          "s3:PutObject",
         ]
         Effect   = "Allow"
         Resource = ["${aws_s3_bucket.assets.arn}/*"]
       },
       {
-        Action = ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"]
+        Sid = "CloudWatchLogsAccess"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
         Effect = "Allow"
-        Resource = "*"
+        Resource = "arn:aws:logs:*:*:log-group:/aws/lambda/aplicacion-senas-api:*"
       }
     ]
   })
@@ -149,6 +214,13 @@ resource "aws_lambda_function" "api" {
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "aplicacion-senas-api"
   protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins = var.cors_allowed_origins
+    allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers = ["Content-Type", "Authorization"]
+    max_age       = 300
+  }
 }
 
 resource "aws_apigatewayv2_integration" "lambda_integration" {
@@ -169,6 +241,30 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.http_api.id
   name        = "$default"
   auto_deploy = true
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gateway_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      routeKey       = "$context.routeKey"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
+  }
+
+  default_route_settings {
+    throttling_burst_limit = 100
+    throttling_rate_limit  = 50
+  }
+}
+
+resource "aws_cloudwatch_log_group" "api_gateway_logs" {
+  name              = "/aws/apigateway/aplicacion-senas-api"
+  retention_in_days = 7
 }
 
 resource "aws_lambda_permission" "apigw" {

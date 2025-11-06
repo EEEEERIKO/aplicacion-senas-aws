@@ -39,3 +39,9 @@ variable "lambda_handler" {
   type        = string
   default     = "lambda_handler.handler"
 }
+
+variable "cors_allowed_origins" {
+  description = "List of allowed origins for CORS. Use ['*'] only for development; restrict in production."
+  type        = list(string)
+  default     = ["*"]
+}
