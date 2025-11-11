@@ -1,3 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# LocalStack data
+localstack-data/
+
+# IDEs
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+
+# Terraform local state
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Node
+node_modules/
+
+# Android / iOS build files (Flutter)
+**/build/
+**/ios/Pods/
+**/android/.gradle/
+**/android/app/build/
+
+# Archives
+*.zip
+*.tar.gz
+
 /.terraform/
 .terraform.lock.hcl
 *.tfstate

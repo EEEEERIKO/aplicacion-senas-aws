@@ -1,3 +1,68 @@
+# Repositorio: Auditoría rápida de seguridad y limpieza
+
+Resumen rápido
+- Se detectaron directorios de entornos virtuales (por ejemplo `services/api/.venv`) y artefactos que no deben estar en el repositorio.
+- Recomendación: eliminarlos del control de versiones y añadir reglas en `.gitignore`.
+- Revisar commits anteriores por secretos (AWS keys, tokens). Si se encuentran, rotar/invalidar inmediatamente.
+
+Problemas encontrados
+- Entornos virtuales incluidos (por ejemplo: `services/api/.venv`) → bloat y posible fuga de paquetes/archivos binarios.
+- Posibles artefactos build (dist/, build/, node_modules/) — revisar si existen en el repo.
+- No hay backend remoto de Terraform configurado (riesgo de estado compartido y bloqueos).
+
+Riesgos y prioridades
+1. Secretos comprometidos en commits — ALTO. Buscar y rotar si existen.
+2. Entornos virtuales y binarios en repo — MEDIO. Inflan el repo y rompen portabilidad.
+3. Terraform local state sin backend — MEDIO. Poner backend S3 + tabla DynamoDB para locks.
+
+Pasos recomendados (ejecución local) — revisar antes de ejecutar
+1) Añadir `.gitignore` (ya presente en HEAD) para ignorar `.venv`, `localstack-data/`, `__pycache__`, `*.pyc`, `dist/`, `build/`.
+
+2) Remover archivos actualmente trackeados por git y hacer commit (no borra historial):
+
+   git rm -r --cached services/api/.venv
+   git rm -r --cached **/localstack-data || true
+   git rm -r --cached dist || true
+   git rm -r --cached build || true
+   git commit -m "chore: remove venv and build artifacts from repo, add .gitignore"
+
+   Nota: usar `git status` para ver exactamente qué se eliminará del índice antes de commit.
+
+3) Si hay ficheros grandes ya comiteados y quieres purgarlos del historial (opcional, intrusivo):
+
+   - Usar `git filter-repo` (recomendado) o `bfg` para eliminar archivos del histórico.
+   - Ejemplo con filter-repo (instalar primero):
+
+       pip install git-filter-repo
+       git filter-repo --path services/api/.venv --invert-paths
+
+   Esto reescribe historial; coordinar con todos los colaboradores y forzar push.
+
+4) Buscar secretos en el repo (ejecutar localmente):
+
+   - Usar `git secrets` o `truffleHog` o `gitleaks`.
+   - Ejemplo rápido con `gitleaks`: `gitleaks detect --source .`
+
+   Si se encuentran credenciales AWS o tokens: rotar/invalidar inmediatamente y crear nuevos secretos.
+
+5) Mejorar IAM / Terraform:
+   - Limitar el role de GitHub Actions a recursos concretos (ya acotado en `infra/terraform/main.tf` en esta rama).
+   - Configurar backend remoto para Terraform (S3 + DynamoDB lock).
+
+6) Añadir un job de CI que ejecute linter, tests y chequeos de secretos antes de permitir terraform apply.
+
+Próximos pasos que puedo ejecutar por ti
+- Crear `.gitignore` (hecho).
+- Añadir un script `scripts/repo_cleanup.sh` con los comandos recomendados (hecho).
+- Modificar la política del rol de GitHub Actions en Terraform para restringir recursos (hecho en esta rama).
+
+Acciones que requieren tu confirmación o credenciales
+- Ejecutar los comandos git que eliminan archivos del índice y forzar push.
+- Ejecutar `git filter-repo` o `bfg` para purgar histórico (si eliges hacerlo).
+- Rotar cualquier credencial detectada.
+
+Contacto / notas
+- Si quieres, ejecuto los pasos no destructivos y te doy los comandos exactos para los pasos destructivos (purga de historial y push forzado).
 # 🔒 Security Audit Report - Aplicación Señas AWS
 **Date**: November 6, 2025  
 **Purpose**: Pre-commit security review for open source release  
